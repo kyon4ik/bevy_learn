@@ -18,3 +18,4 @@ tracing.workspace = true
 
 [dev-dependencies]
 bevy = { version = "0.16", features = ["wayland"] }
+bevy_panorbit_camera = "0.26"

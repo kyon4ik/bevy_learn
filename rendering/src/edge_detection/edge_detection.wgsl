@@ -5,9 +5,7 @@ struct EdgeDetection {
     normal_threshold: vec2<f32>,
     edge_color: vec4<f32>,
     width: f32,
-#ifdef SIXTEEN_BYTE_ALIGNMENT
-    _webgl_padding: f32,
-#endif
+    final_threshold: f32,
 }
 
 @group(0) @binding(0) var screen_texture: texture_2d<f32>;
@@ -25,11 +23,7 @@ fn fragment(
 
     let screen_texture = textureSample(screen_texture, texture_sampler, in.uv);
 
-#ifdef NO_DEPTH_TEXTURE_SUPPORT
-    let depth_edge = 0.0;
-#else
     let depth_edge = sobel_depth(in.uv, texel_size);
-#endif
     let normal_edge = sobel_normal(in.uv, texel_size);
 
     let depth_low = settings.depth_threshold.x;
@@ -39,9 +33,7 @@ fn fragment(
      
     // Combine the edge detection results
     let edge = smoothstep(depth_low, depth_high, depth_edge) + smoothstep(normal_low, normal_high, normal_edge);
-    let final_edge = saturate(edge);
-
-    return mix(screen_texture, settings.edge_color, final_edge);    
+    return mix(screen_texture, settings.edge_color, step(settings.final_threshold, edge));    
 }
 
 // Helper function to sample normals 

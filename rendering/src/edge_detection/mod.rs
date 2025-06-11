@@ -25,15 +25,17 @@ pub struct EdgeDetection {
     pub width: f32,
     pub depth_threshold: Vec2,
     pub normal_threshold: Vec2,
+    pub final_threshold: f32,
 }
 
 impl Default for EdgeDetection {
     fn default() -> Self {
         Self {
             edge_color: Color::BLACK,
-            width: 1.0,
-            depth_threshold: Vec2::new(0.0, 0.03),
+            width: 1.5,
+            depth_threshold: Vec2::new(0.0, 0.02),
             normal_threshold: Vec2::new(0.5, 5.0),
+            final_threshold: 0.5,
         }
     }
 }
@@ -49,6 +51,7 @@ impl ExtractComponent for EdgeDetection {
             normal_threshold: item.normal_threshold,
             edge_color: item.edge_color.to_linear(),
             width: item.width,
+            final_threshold: item.final_threshold,
         })
     }
 }
@@ -59,6 +62,7 @@ pub struct EdgeDetectionUniform {
     normal_threshold: Vec2,
     edge_color: LinearRgba,
     width: f32,
+    final_threshold: f32,
 }
 
 pub const EDGE_DETECTION_SHADER_HANDLE: Handle<Shader> =
@@ -96,7 +100,11 @@ impl Plugin for EdgeDetectionPlugin {
             )
             .add_render_graph_edges(
                 Core3d,
-                (Node3d::EndMainPass, EdgeDetectionLabel, Node3d::MotionBlur),
+                (
+                    Node3d::PostProcessing,
+                    EdgeDetectionLabel,
+                    Node3d::EndMainPassPostProcessing,
+                ),
             );
     }
 
