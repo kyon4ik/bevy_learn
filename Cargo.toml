@@ -1,0 +1,68 @@
+[workspace]
+resolver = "2"
+members = ["rendering"]
+
+[workspace.dependencies]
+bevy_asset = "0.16"
+bevy_app = "0.16"
+bevy_color = "0.16"
+bevy_ecs = "0.16"
+bevy_image = "0.16"
+bevy_math = "0.16"
+bevy_render = "0.16"
+bevy_core_pipeline = "0.16"
+
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[workspace.lints.clippy]
+doc_markdown = "warn"
+manual_let_else = "warn"
+match_same_arms = "warn"
+redundant_closure_for_method_calls = "warn"
+redundant_else = "warn"
+semicolon_if_nothing_returned = "warn"
+type_complexity = "allow"
+undocumented_unsafe_blocks = "warn"
+unwrap_or_default = "warn"
+needless_lifetimes = "allow"
+too_many_arguments = "allow"
+nonstandard_macro_braces = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+
+ptr_as_ptr = "warn"
+ptr_cast_constness = "warn"
+ref_as_ptr = "warn"
+
+# see: https://github.com/bevyengine/bevy/pull/15375#issuecomment-2366966219
+too_long_first_doc_paragraph = "allow"
+
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"
+
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs_dep)'] }
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "warn"
+unused_qualifications = "warn"
+
+# Enable a small amount of optimization in the dev profile.
+[profile.dev]
+opt-level = 1
+
+# Enable a large amount of optimization in the dev profile for dependencies.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Remove expensive debug assertions due to <https://github.com/bevyengine/bevy/issues/14291>
+[profile.dev.package.wgpu-types]
+debug-assertions = false
+
+[profile.release]
+codegen-units = 1
+lto = "thin"

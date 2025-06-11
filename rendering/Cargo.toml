@@ -1,0 +1,20 @@
+[package]
+name = "rendering"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy_app.workspace = true
+bevy_asset = { workspace = true, features = ["multi_threaded"] }
+bevy_color.workspace = true
+bevy_ecs = { workspace = true, features = ["multi_threaded"] }
+bevy_image.workspace = true
+bevy_math.workspace = true
+bevy_render = { workspace = true, features = ["webgpu", "multi_threaded"] }
+# now only support webgpu
+bevy_core_pipeline = { workspace = true, features = ["webgpu"] }
+
+tracing.workspace = true
+
+[dev-dependencies]
+bevy = { version = "0.16", features = ["wayland"] }
