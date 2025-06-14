@@ -7,15 +7,6 @@ struct VoxelVolume {
 @group(0) @binding(0) var<storage, read_write> output: array<vec3<f32>>;
 @group(0) @binding(1) var<uniform> volume: VoxelVolume;
 
-fn sphere_sdf(pos: vec3<f32>) -> f32 {
-    let radius = 0.5;
-    return length(pos) - radius;
-}
-
-fn scene_sdf(pos: vec3<f32>) -> f32 {
-    return sphere_sdf(pos);
-}
-
 //
 // Lookup Tables for Marching Cubes
 //
@@ -28,43 +19,35 @@ fn scene_sdf(pos: vec3<f32>) -> f32 {
 //    y = (i & 2) >> 1
 //    z = (i & 4) >> 2
 //
-// Axes are:
-//
-//      y
-//      |     z
-//      |   /
-//      | /
-//      +----- x
-//
 // Vertex and edge layout:
 //
-//            6             7
+//            7             6
 //            +-------------+               +-----6-------+   
 //          / |           / |             / |            /|   
-//        /   |         /   |          11   7         10   5
-//    2 +-----+-------+  3  |         +-----+2------+     |   
-//      |   4 +-------+-----+ 5       |     +-----4-+-----+   
-//      |   /         |   /           3   8         1   9
+//        /   |         /   |          10   5         11   7
+//    3 +-----+-------+  2  |         +-----+2------+     |   
+//      |   5 +-------+-----+ 4       |     +-----4-+-----+   
+//      |   /         |   /           1   9         3   8
 //      | /           | /             | /           | /       
-//    0 +-------------+ 1             +------0------+         
+//    1 +-------------+ 0             +------0------+         
 //
 // Triangulation cases are generated prioritising rotations over inversions, which can introduce non-manifold geometry.
 //
 
 // Pair of vertex indices for each edge on the cube
 const EDGE_VERTEX_IDS: array<vec2<u32>, 12> = array(
-	vec2<u32>(0, 1),
-	vec2<u32>(1, 3),
-	vec2<u32>(3, 2),
-	vec2<u32>(2, 0),
-	vec2<u32>(4, 5),
-	vec2<u32>(5, 7),
-	vec2<u32>(7, 6),
-	vec2<u32>(6, 4),
-	vec2<u32>(0, 4),
-	vec2<u32>(1, 5),
-	vec2<u32>(3, 7),
-	vec2<u32>(2, 6),
+    vec2<u32>(0, 1),
+    vec2<u32>(1, 3),
+    vec2<u32>(3, 2),
+    vec2<u32>(2, 0),
+    vec2<u32>(4, 5),
+    vec2<u32>(5, 7),
+    vec2<u32>(7, 6),
+    vec2<u32>(6, 4),
+    vec2<u32>(0, 4),
+    vec2<u32>(1, 5),
+    vec2<u32>(3, 7),
+    vec2<u32>(2, 6),
 );
 
 // to calculate count, use T[i] - T[max(i-1, 0)]
@@ -74,6 +57,7 @@ const TRIANGLE_OFFSET_TABLE: array<u32, 256> = array(
 );
 
 const TRIANGLE_TABLE: array<u32, 2197> = array(
+    // First empty 
 	0, 3, 8,
 	0, 9, 1,
 	3, 8, 1, 1, 8, 9,
@@ -332,9 +316,24 @@ const TRIANGLE_TABLE: array<u32, 2197> = array(
     42
 );
 
-@compute @workgroup_size(8, 8, 8)
+
+fn sphere_sdf(pos: vec3<f32>, radius: f32) -> f32 {
+    return length(pos) - radius;
+}
+
+fn torus_sdf(pos: vec3<f32>, radius: vec2<f32>) -> f32 {
+    let q = vec2<f32>(length(pos.xz) - radius.x, pos.y);
+    return length(q) - radius.y;
+}
+
+fn scene_sdf(pos: vec3<f32>) -> f32 {
+    return torus_sdf(pos, vec2f(0.5, 0.15));
+}
+
+@compute @workgroup_size(1, 1, 1)
 fn compute_vertices(@builtin(global_invocation_id) invocation_id: vec3<u32>) { 
-    let coord = vec3<f32>(invocation_id) * volume.voxel_size;
+    let volume_size = volume.max_bound - volume.min_bound;
+    let coord = vec3<f32>(invocation_id) * volume.voxel_size - volume_size / 2.0;
 
     var position: array<vec3<f32>, 8>;
     var mask: u32 = 0;
@@ -351,16 +350,16 @@ fn compute_vertices(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         }
     }
 
-    let count = vec3<u32>(floor((volume.max_bound - volume.min_bound) / volume.voxel_size));
+    let count = vec3<u32>(floor(volume_size / volume.voxel_size));
+    let idx = invocation_id.x + count.x * (invocation_id.y + count.y * invocation_id.z); 
 
     let start = TRIANGLE_OFFSET_TABLE[max(i32(mask) - 1, 0)];
     let end = TRIANGLE_OFFSET_TABLE[mask];
     for (var i = start; i < end; i++) {
         let edge_id = TRIANGLE_TABLE[i]; 
-        let first = EDGE_VERTEX_IDS[i].x;
-        let second = EDGE_VERTEX_IDS[i].y;
-        let idx = invocation_id.x + count.x * (invocation_id.y + count.y * invocation_id.z); 
-        output[idx] = (position[first] + position[second]) * 0.5;
+        let first = EDGE_VERTEX_IDS[edge_id].x;
+        let second = EDGE_VERTEX_IDS[edge_id].y;
+        output[12 * idx + i - start] = (position[first] + position[second]) * 0.5;
     }
 }
 

@@ -7,7 +7,7 @@ use bevy_render::renderer::RenderContext;
 use super::VoxelVolumeUniform;
 use super::pipeline::{MarchingCubesBindGroup, MarchingCubesPipeline};
 
-const WORKGROUP_SIZE: u32 = 8;
+const WORKGROUP_SIZE: u32 = 1;
 
 #[derive(Default)]
 pub struct MarchingCubesNode {
@@ -52,7 +52,13 @@ impl render_graph::Node for MarchingCubesNode {
         let voxel_count = ((voxel_volume.max_bound - voxel_volume.min_bound)
             / voxel_volume.voxel_size)
             .as_uvec3();
-        let workgroup_size = (voxel_count + UVec3::splat(WORKGROUP_SIZE)) / WORKGROUP_SIZE;
+        let workgroup_size = (voxel_count + UVec3::splat(WORKGROUP_SIZE - 1)) / WORKGROUP_SIZE;
+        if TELL_WORKGROUPS
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            tracing::info!("Workgroups: {}", workgroup_size);
+        }
 
         let mut pass = render_context
             .command_encoder()
@@ -68,3 +74,6 @@ impl render_graph::Node for MarchingCubesNode {
         Ok(())
     }
 }
+
+use std::sync::atomic::{AtomicBool, Ordering};
+static TELL_WORKGROUPS: AtomicBool = AtomicBool::new(false);

@@ -89,7 +89,7 @@ impl Default for VoxelVolume {
     fn default() -> Self {
         Self {
             aabb: Aabb3d::new(Vec3::ZERO, Vec3::ONE),
-            voxel_size: 1.0,
+            voxel_size: 0.25,
         }
     }
 }

@@ -3640,6 +3640,7 @@ dependencies = [
  "bevy_image",
  "bevy_math",
  "bevy_panorbit_camera",
+ "bevy_pbr",
  "bevy_render",
  "bytemuck",
  "tracing",

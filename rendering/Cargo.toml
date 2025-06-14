@@ -10,9 +10,10 @@ bevy_color.workspace = true
 bevy_ecs = { workspace = true, features = ["multi_threaded"] }
 bevy_image.workspace = true
 bevy_math.workspace = true
-bevy_render = { workspace = true, features = ["webgpu", "multi_threaded"] }
 # now only support webgpu
+bevy_render = { workspace = true, features = ["webgpu", "multi_threaded"] }
 bevy_core_pipeline = { workspace = true, features = ["webgpu"] }
+bevy_pbr = { workspace = true, features = ["webgpu"] }
 
 tracing.workspace = true
 bytemuck = { workspace = true, features = ["derive"] }

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
-use rendering::marching_cubes::{MarchingCubesPlugin, VoxelVolume};
+use rendering::marching_cubes::MarchingCubesPlugin;
 
 fn main() {
     App::new()
@@ -12,8 +12,7 @@ fn main() {
 fn setup(mut commands: Commands) {
     commands.spawn((
         PanOrbitCamera::default(),
-        Transform::from_xyz(0.7, 0.7, 1.0).looking_at(Vec3::new(0.0, 0.3, 0.0), Vec3::Y),
+        Msaa::Off,
+        Transform::from_xyz(0.0, 0.0, -4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
-
-    commands.insert_resource(VoxelVolume::default());
 }

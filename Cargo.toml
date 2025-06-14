@@ -11,6 +11,7 @@ bevy_image = "0.16"
 bevy_math = "0.16"
 bevy_render = "0.16"
 bevy_core_pipeline = "0.16"
+bevy_pbr = "0.16"
 
 bytemuck = "1.23"
 tracing = { version = "0.1", default-features = false, features = ["std"] }

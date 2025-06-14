@@ -2,9 +2,12 @@ use bevy_app::{App, Plugin};
 use bevy_asset::{Assets, Handle, RenderAssetUsages};
 use bevy_ecs::resource::Resource;
 use bevy_ecs::world::FromWorld;
+use bevy_math::Vec3;
 use bevy_render::extract_resource::{ExtractResource, ExtractResourcePlugin};
+use bevy_render::render_resource::BufferUsages;
 use bevy_render::storage::ShaderStorageBuffer;
 
+use bytemuck::{Pod, Zeroable};
 pub use compute_stage::VoxelVolume;
 
 pub mod compute_stage;
@@ -18,7 +21,16 @@ impl Plugin for MarchingCubesPlugin {
 
         app.init_resource::<MarchingCubesBuffers>();
         app.add_plugins(ExtractResourcePlugin::<MarchingCubesBuffers>::default());
+
+        app.add_plugins(display_stage::MarchingCubesDisplayPlugin);
     }
+}
+
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
+struct Vertex {
+    position: Vec3,
+    _pad0: f32,
 }
 
 #[derive(Resource, Clone, ExtractResource)]
@@ -33,10 +45,12 @@ impl FromWorld for MarchingCubesBuffers {
         tracing::info!("Voxels Count: {}", buffer_size);
 
         let mut storage_buffers = world.resource_mut::<Assets<ShaderStorageBuffer>>();
-        let vertices = storage_buffers.add(ShaderStorageBuffer::with_size(
-            12 * 4 * buffer_size,
+        let mut vertex_buffer = ShaderStorageBuffer::with_size(
+            12 * size_of::<Vertex>() * buffer_size,
             RenderAssetUsages::RENDER_WORLD,
-        ));
+        );
+        vertex_buffer.buffer_description.usage |= BufferUsages::VERTEX;
+        let vertices = storage_buffers.add(vertex_buffer);
 
         Self { vertices }
     }
