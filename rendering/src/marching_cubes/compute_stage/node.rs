@@ -7,7 +7,7 @@ use bevy_render::renderer::RenderContext;
 use super::VoxelVolumeUniform;
 use super::pipeline::{MarchingCubesBindGroup, MarchingCubesPipeline};
 
-const WORKGROUP_SIZE: u32 = 1;
+const WORKGROUP_SIZE: u32 = 2;
 
 #[derive(Default)]
 pub struct MarchingCubesNode {

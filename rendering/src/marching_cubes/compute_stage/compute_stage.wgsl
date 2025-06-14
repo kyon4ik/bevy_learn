@@ -316,6 +316,8 @@ const TRIANGLE_TABLE: array<u32, 2197> = array(
     42
 );
 
+const EPSILON: f32 = 0.00001; 
+const MAX_VERTS: u32 = 12;
 
 fn sphere_sdf(pos: vec3<f32>, radius: f32) -> f32 {
     return length(pos) - radius;
@@ -327,15 +329,16 @@ fn torus_sdf(pos: vec3<f32>, radius: vec2<f32>) -> f32 {
 }
 
 fn scene_sdf(pos: vec3<f32>) -> f32 {
+    // return sphere_sdf(pos, 0.5); 
     return torus_sdf(pos, vec2f(0.5, 0.15));
 }
 
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(2, 2, 2)
 fn compute_vertices(@builtin(global_invocation_id) invocation_id: vec3<u32>) { 
     let volume_size = volume.max_bound - volume.min_bound;
     let coord = vec3<f32>(invocation_id) * volume.voxel_size - volume_size / 2.0;
 
-    var position: array<vec3<f32>, 8>;
+    var data: array<vec4<f32>, 8>;
     var mask: u32 = 0;
     for (var i: u32 = 0; i < 8; i++) {
         var offset: vec3<f32>;
@@ -343,9 +346,10 @@ fn compute_vertices(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         offset.y = f32((i & 2) >> 1);
         offset.z = f32((i & 4) >> 2);
 
-        position[i] = coord + offset * volume.voxel_size;
-        let inside = scene_sdf(position[i]) < 0;
-        if (inside) {
+        let position = coord + offset * volume.voxel_size;
+        let distance = scene_sdf(position);
+        data[i] = vec4<f32>(position, distance);
+        if (distance < 0) {
             mask = mask | (1u << i);
         }
     }
@@ -359,7 +363,21 @@ fn compute_vertices(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let edge_id = TRIANGLE_TABLE[i]; 
         let first = EDGE_VERTEX_IDS[edge_id].x;
         let second = EDGE_VERTEX_IDS[edge_id].y;
-        output[12 * idx + i - start] = (position[first] + position[second]) * 0.5;
+
+        // Interpolation
+        var final_point: vec3<f32>;
+        if (abs(data[first].w) < EPSILON) {
+            final_point = data[first].xyz;
+        } else if (abs(data[second].w) < EPSILON) {
+            final_point = data[second].xyz;
+        } else if (abs(data[first].w - data[second].w) < EPSILON) {
+            final_point = data[first].xyz;
+        } else {
+            let factor = -data[first].w / (data[second].w - data[first].w);
+            final_point = mix(data[first].xyz, data[second].xyz, factor);
+        }
+        
+        output[MAX_VERTS * idx + i - start] = final_point;
     }
 }
 

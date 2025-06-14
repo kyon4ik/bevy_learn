@@ -26,6 +26,8 @@ impl Plugin for MarchingCubesPlugin {
     }
 }
 
+const MAX_VERTS_PER_VOXEL: usize = 12;
+
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 #[repr(C)]
 struct Vertex {
@@ -46,7 +48,7 @@ impl FromWorld for MarchingCubesBuffers {
 
         let mut storage_buffers = world.resource_mut::<Assets<ShaderStorageBuffer>>();
         let mut vertex_buffer = ShaderStorageBuffer::with_size(
-            12 * size_of::<Vertex>() * buffer_size,
+            MAX_VERTS_PER_VOXEL * size_of::<Vertex>() * buffer_size,
             RenderAssetUsages::RENDER_WORLD,
         );
         vertex_buffer.buffer_description.usage |= BufferUsages::VERTEX;
