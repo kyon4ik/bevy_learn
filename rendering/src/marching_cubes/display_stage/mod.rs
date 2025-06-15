@@ -1,43 +1,69 @@
 use bevy_app::{App, Plugin};
-use bevy_asset::{Handle, load_internal_asset, weak_handle};
-use bevy_core_pipeline::core_3d::CORE_3D_DEPTH_FORMAT;
-use bevy_core_pipeline::core_3d::graph::{Core3d, Node3d};
-use bevy_ecs::query::QueryItem;
+use bevy_asset::{AssetId, Handle, load_internal_asset, weak_handle};
+use bevy_core_pipeline::core_3d::{
+    CORE_3D_DEPTH_FORMAT, Opaque3d, Opaque3dBatchSetKey, Opaque3dBinKey,
+};
+use bevy_ecs::component::{Component, Tick};
+use bevy_ecs::query::ROQueryItem;
 use bevy_ecs::resource::Resource;
-use bevy_ecs::world::{FromWorld, World};
+use bevy_ecs::schedule::IntoScheduleConfigs;
+use bevy_ecs::system::lifetimeless::SRes;
+use bevy_ecs::system::{Local, Query, Res, ResMut, SystemParamItem};
+use bevy_ecs::world::FromWorld;
 use bevy_image::BevyDefault;
-use bevy_render::RenderApp;
-use bevy_render::mesh::{VertexBufferLayout, VertexFormat};
+use bevy_pbr::{MeshPipeline, MeshPipelineKey, MeshPipelineViewLayoutKey, SetMeshViewBindGroup};
+use bevy_render::extract_component::{ExtractComponent, ExtractComponentPlugin};
+use bevy_render::mesh::{Mesh, PrimitiveTopology, VertexBufferLayout, VertexFormat};
 use bevy_render::render_asset::RenderAssets;
-use bevy_render::render_graph::{
-    NodeRunError, RenderGraphApp, RenderGraphContext, RenderLabel, ViewNode, ViewNodeRunner,
+use bevy_render::render_phase::{
+    AddRenderCommand, BinnedRenderPhaseType, DrawFunctions, InputUniformIndex, PhaseItem,
+    RenderCommand, RenderCommandResult, SetItemPipeline, TrackedRenderPass, ViewBinnedRenderPhases,
 };
-use bevy_render::render_resource::binding_types::uniform_buffer;
 use bevy_render::render_resource::{
-    BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries, CachedRenderPipelineId,
-    ColorTargetState, ColorWrites, CompareFunction, DepthStencilState, FragmentState,
-    MultisampleState, Operations, PipelineCache, PrimitiveState, RenderPassColorAttachment,
-    RenderPassDescriptor, RenderPipelineDescriptor, Shader, ShaderStages, StoreOp, TextureFormat,
-    VertexAttribute, VertexState, VertexStepMode,
+    ColorTargetState, ColorWrites, CompareFunction, DepthStencilState, Face, FragmentState,
+    MultisampleState, PipelineCache, PrimitiveState, RenderPipelineDescriptor, Shader,
+    SpecializedRenderPipeline, SpecializedRenderPipelines, TextureFormat, VertexAttribute,
+    VertexState, VertexStepMode,
 };
-use bevy_render::renderer::{RenderContext, RenderDevice};
 use bevy_render::storage::GpuShaderStorageBuffer;
-use bevy_render::view::{
-    ViewDepthTexture, ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms,
-};
+use bevy_render::view::{ExtractedView, Msaa, RenderVisibleEntities, ViewTarget, VisibilityClass};
+use bevy_render::{Render, RenderApp, RenderSet, view};
 
 use super::{MarchingCubesBuffers, Vertex};
 
-pub struct MarchingCubesDisplayPlugin;
+pub struct VoxelRenderedPlugin;
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-struct MarchingCubesDisplayLabel;
+// structs
+#[derive(Clone, Component, ExtractComponent)]
+#[require(VisibilityClass)]
+#[component(on_add = view::add_visibility_class::<VoxeledRendered>)]
+pub struct VoxeledRendered;
+
+#[derive(Resource, FromWorld)]
+pub struct VoxelRenderedPipeline {
+    mesh_pipeline: MeshPipeline,
+}
+
+struct DrawVoxeled;
+
+type DrawVoxeledCommands = (SetItemPipeline, SetMeshViewBindGroup<0>, DrawVoxeled);
 
 pub const DISPLAY_STAGE_SHADER_HANDLE: Handle<Shader> =
     weak_handle!("65b1d237-3e83-4d22-8097-2bb33a3462ae");
 
-impl Plugin for MarchingCubesDisplayPlugin {
+impl Plugin for VoxelRenderedPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(ExtractComponentPlugin::<VoxeledRendered>::default());
+
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+
+        render_app.add_render_command::<Opaque3d, DrawVoxeledCommands>();
+        render_app.add_systems(Render, queue_voxel_rendered_phase.in_set(RenderSet::Queue));
+    }
+
+    fn finish(&self, app: &mut App) {
         load_internal_asset!(
             app,
             DISPLAY_STAGE_SHADER_HANDLE,
@@ -50,160 +76,151 @@ impl Plugin for MarchingCubesDisplayPlugin {
         };
 
         render_app
-            .add_render_graph_node::<ViewNodeRunner<MarchingCubesDisplayNode>>(
-                Core3d,
-                MarchingCubesDisplayLabel,
-            )
-            .add_render_graph_edges(
-                Core3d,
-                (
-                    Node3d::Tonemapping,
-                    MarchingCubesDisplayLabel,
-                    Node3d::EndMainPassPostProcessing,
-                ),
-            );
-    }
-
-    fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-
-        render_app.init_resource::<MarchingCubesDisplayPipeline>();
+            .init_resource::<VoxelRenderedPipeline>()
+            .init_resource::<SpecializedRenderPipelines<VoxelRenderedPipeline>>();
     }
 }
 
-#[derive(Default)]
-pub struct MarchingCubesDisplayNode;
-
-#[derive(Resource)]
-pub struct MarchingCubesDisplayPipeline {
-    layout: BindGroupLayout,
-    pipeline_id: CachedRenderPipelineId,
-}
-
-impl ViewNode for MarchingCubesDisplayNode {
-    type ViewQuery = (
-        &'static ViewTarget,
-        &'static ViewDepthTexture,
-        &'static ViewUniformOffset,
+impl<P: PhaseItem> RenderCommand<P> for DrawVoxeled {
+    type Param = (
+        SRes<MarchingCubesBuffers>,
+        SRes<RenderAssets<GpuShaderStorageBuffer>>,
     );
 
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        (view_target, view_depth, view_uniform_offset): QueryItem<Self::ViewQuery>,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
-        let display_pipeline = world.resource::<MarchingCubesDisplayPipeline>();
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let marching_cubes_buffers = world.resource::<MarchingCubesBuffers>();
-        let gpu_buffers = world.resource::<RenderAssets<GpuShaderStorageBuffer>>();
-        let view_uniforms = world.resource::<ViewUniforms>();
+    type ViewQuery = ();
 
-        let Some(pipeline) = pipeline_cache.get_render_pipeline(display_pipeline.pipeline_id)
-        else {
-            return Ok(());
-        };
+    type ItemQuery = ();
 
-        let Some(vertex_buffer) = gpu_buffers.get(marching_cubes_buffers.vertices.id()) else {
-            return Ok(());
-        };
+    fn render<'w>(
+        _item: &P,
+        _view: ROQueryItem<'w, Self::ViewQuery>,
+        _entity: Option<ROQueryItem<'w, Self::ItemQuery>>,
+        param: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let marching_cubes_buffers = param.0.into_inner();
+        let gpu_storage_buffers = param.1.into_inner();
 
-        let Some(view_binding) = view_uniforms.uniforms.binding() else {
-            return Ok(());
-        };
+        let vertices = gpu_storage_buffers
+            .get(marching_cubes_buffers.vertices.id())
+            .unwrap();
 
-        let bind_group = render_context.render_device().create_bind_group(
-            Some("marching_cubes_display_bind_group"),
-            &display_pipeline.layout,
-            &BindGroupEntries::single(view_binding),
-        );
+        pass.set_vertex_buffer(0, vertices.buffer.slice(..));
 
-        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-            label: Some("marching_cubes_display_pass"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: view_target.post_process_write().destination,
-                resolve_target: None,
-                ops: Operations::default(),
-            })],
-            depth_stencil_attachment: Some(view_depth.get_attachment(StoreOp::Store)),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
+        let num = vertices.buffer.size() / size_of::<Vertex>() as u64;
+        pass.draw(0..num as u32, 0..1);
 
-        render_pass.set_render_pipeline(pipeline);
-        render_pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
-        render_pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
-
-        let num_vertices = vertex_buffer.buffer.size() / size_of::<Vertex>() as u64;
-        render_pass.draw(0..num_vertices as u32, 0..1);
-
-        Ok(())
+        RenderCommandResult::Success
     }
 }
 
-impl FromWorld for MarchingCubesDisplayPipeline {
-    fn from_world(world: &mut World) -> Self {
-        let render_device = world.resource::<RenderDevice>();
-        let layout = render_device.create_bind_group_layout(
-            "marching_cubes_display_layout",
-            &BindGroupLayoutEntries::single(
-                ShaderStages::VERTEX,
-                uniform_buffer::<ViewUniform>(true),
-            ),
-        );
+impl SpecializedRenderPipeline for VoxelRenderedPipeline {
+    type Key = MeshPipelineKey;
 
-        let pipeline_id =
-            world
-                .resource_mut::<PipelineCache>()
-                .queue_render_pipeline(RenderPipelineDescriptor {
-                    label: Some("marching_cubes_display_pipeline".into()),
-                    layout: vec![layout.clone()],
-                    vertex: VertexState {
-                        shader: DISPLAY_STAGE_SHADER_HANDLE,
-                        shader_defs: vec![],
-                        entry_point: "vertex".into(),
-                        buffers: vec![VertexBufferLayout {
-                            array_stride: size_of::<Vertex>() as u64,
-                            step_mode: VertexStepMode::Vertex,
-                            attributes: vec![VertexAttribute {
-                                format: VertexFormat::Float32x3,
-                                offset: 0,
-                                shader_location: 0,
-                            }],
-                        }],
+    fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
+        RenderPipelineDescriptor {
+            label: Some("voxel_rendered_pipeline".into()),
+            layout: vec![
+                self.mesh_pipeline
+                    .get_view_layout(MeshPipelineViewLayoutKey::from(key))
+                    .clone(),
+            ],
+            push_constant_ranges: vec![],
+            vertex: VertexState {
+                shader: DISPLAY_STAGE_SHADER_HANDLE,
+                shader_defs: vec![],
+                entry_point: "vertex".into(),
+                buffers: vec![VertexBufferLayout {
+                    array_stride: size_of::<Vertex>() as u64,
+                    step_mode: VertexStepMode::Vertex,
+                    attributes: vec![VertexAttribute {
+                        format: VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                }],
+            },
+            fragment: Some(FragmentState {
+                shader: DISPLAY_STAGE_SHADER_HANDLE,
+                shader_defs: vec![],
+                entry_point: "fragment".into(),
+                targets: vec![Some(ColorTargetState {
+                    format: if key.contains(MeshPipelineKey::HDR) {
+                        ViewTarget::TEXTURE_FORMAT_HDR
+                    } else {
+                        TextureFormat::bevy_default()
                     },
-                    fragment: Some(FragmentState {
-                        shader: DISPLAY_STAGE_SHADER_HANDLE,
-                        shader_defs: vec![],
-                        entry_point: "fragment".into(),
-                        targets: vec![Some(ColorTargetState {
-                            format: TextureFormat::bevy_default(),
-                            blend: None,
-                            write_mask: ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: PrimitiveState {
-                        // cull_mode: None,
-                        ..Default::default()
-                    },
-                    depth_stencil: Some(DepthStencilState {
-                        format: CORE_3D_DEPTH_FORMAT,
-                        depth_write_enabled: false,
-                        depth_compare: CompareFunction::Greater,
-                        stencil: Default::default(),
-                        bias: Default::default(),
-                    }),
-                    multisample: MultisampleState::default(),
-                    push_constant_ranges: vec![],
-                    zero_initialize_workgroup_memory: false,
-                });
+                    blend: None,
+                    write_mask: ColorWrites::ALL,
+                })],
+            }),
+            primitive: PrimitiveState {
+                topology: key.primitive_topology(),
+                cull_mode: Some(Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(DepthStencilState {
+                format: CORE_3D_DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: CompareFunction::GreaterEqual,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: MultisampleState {
+                count: key.msaa_samples(),
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            zero_initialize_workgroup_memory: false,
+        }
+    }
+}
 
-        Self {
-            layout,
-            pipeline_id,
+fn queue_voxel_rendered_phase(
+    pipeline_cache: Res<PipelineCache>,
+    voxel_rendered_pipeline: Res<VoxelRenderedPipeline>,
+    mut opaque_render_phases: ResMut<ViewBinnedRenderPhases<Opaque3d>>,
+    opaque_draw_functions: Res<DrawFunctions<Opaque3d>>,
+    mut specialized_render_pipelines: ResMut<SpecializedRenderPipelines<VoxelRenderedPipeline>>,
+    views: Query<(&ExtractedView, &RenderVisibleEntities, &Msaa)>,
+    mut next_tick: Local<Tick>,
+) {
+    let draw_voxel_rendered = opaque_draw_functions.read().id::<DrawVoxeledCommands>();
+
+    for (view, view_visible_entities, msaa) in views.iter() {
+        let Some(opaque_phase) = opaque_render_phases.get_mut(&view.retained_view_entity) else {
+            continue;
+        };
+
+        for &entity in view_visible_entities.get::<VoxeledRendered>().iter() {
+            let pipeline_id = specialized_render_pipelines.specialize(
+                &pipeline_cache,
+                &voxel_rendered_pipeline,
+                MeshPipelineKey::from_msaa_samples(msaa.samples())
+                    | MeshPipelineKey::from_hdr(view.hdr)
+                    | MeshPipelineKey::from_primitive_topology(PrimitiveTopology::TriangleList),
+            );
+
+            let this_tick = next_tick.get() + 1;
+            next_tick.set(this_tick);
+
+            opaque_phase.add(
+                Opaque3dBatchSetKey {
+                    draw_function: draw_voxel_rendered,
+                    pipeline: pipeline_id,
+                    material_bind_group_index: None,
+                    vertex_slab: Default::default(),
+                    index_slab: None,
+                    lightmap_slab: None,
+                },
+                Opaque3dBinKey {
+                    asset_id: AssetId::<Mesh>::invalid().untyped(),
+                },
+                entity,
+                InputUniformIndex::default(),
+                BinnedRenderPhaseType::NonMesh,
+                *next_tick,
+            );
         }
     }
 }

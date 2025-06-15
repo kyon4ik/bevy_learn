@@ -22,7 +22,7 @@ impl Plugin for MarchingCubesPlugin {
         app.init_resource::<MarchingCubesBuffers>();
         app.add_plugins(ExtractResourcePlugin::<MarchingCubesBuffers>::default());
 
-        app.add_plugins(display_stage::MarchingCubesDisplayPlugin);
+        app.add_plugins(display_stage::VoxelRenderedPlugin);
     }
 }
 
